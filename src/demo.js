@@ -1,0 +1,4 @@
+export const demoProfile={profile:{personaname:'mid or feed',account_id:'demo'},rank_tier:54};
+const heroes=[11,1,44,11,14,1,11,6,44,11,1,14,6,11,44,1,11,14,6,11];
+export const demoMatches=heroes.map((hero_id,i)=>({match_id:`demo-${i}`,hero_id,player_slot:0,radiant_win:![2,4,7,10,13,15,18].includes(i),kills:[14,8,6,19,3,12,15,4,11,16][i%10],deaths:[3,4,9,2,8,5,4,10,3,5][i%10],assists:[12,14,7,9,18,10,8,6,13,11][i%10],gold_per_min:530+(i%5)*36,xp_per_min:640+(i%4)*41,duration:2100+i*53,start_time:1794268800-i*14400,hero_damage:21000+i*1230,last_hits:230+i*6,lobby_type:7}));
+export const demoMmr=[{date:'2026-10-27',value:3400},{date:'2026-10-29',value:3475},{date:'2026-10-31',value:3450},{date:'2026-11-02',value:3550},{date:'2026-11-04',value:3525},{date:'2026-11-06',value:3625},{date:'2026-11-08',value:3600},{date:'2026-11-10',value:3675}];
