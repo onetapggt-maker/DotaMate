@@ -1,2 +1,8 @@
 import { defineConfig } from 'vite';
-export default defineConfig({base:'./'});
+import tailwindcss from '@tailwindcss/vite';
+
+export default defineConfig({
+  base: './',
+  esbuild: { jsx: 'automatic' },
+  plugins: [tailwindcss()],
+});

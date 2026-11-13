@@ -1,8 +1,10 @@
 export function parseAccountId(value) {
  const s=value.trim(); let id;
+ const steam3=s.match(/^\[U:1:(\d{1,10})\]$/i);
  const url=s.match(/^https?:\/\/steamcommunity\.com\/profiles\/(\d+)\/?$/i);
  const steam=s.match(/^STEAM_[0-5]:([01]):(\d+)$/i);
  if(url) id=BigInt(url[1])-76561197960265728n;
+ else if(steam3) id=BigInt(steam3[1]);
  else if(steam) id=BigInt(steam[2])*2n+BigInt(steam[1]);
  else if(/^\d+$/.test(s)) {id=BigInt(s);if(id>4294967295n) id-=76561197960265728n;}
  else throw new Error('Введите числовой ID Dota 2, SteamID64 или ссылку steamcommunity.com/profiles/…');

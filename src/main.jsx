@@ -1,96 +1,71 @@
-import React,{useState,useEffect,useRef} from 'react';
-import {createRoot} from 'react-dom/client';
-import {LayoutDashboard,Swords,Flame,TrendingUp,ArrowUpRight,ArrowRight,Plus,Search,ChevronRight,X,RefreshCw,ExternalLink,Link2,Gamepad2,Target,Zap,Check,Menu} from 'lucide-react';
-import {parseAccountId,isWin,summarize,readSaved,save} from './lib';
-import {loadProfile,rankLabel} from './opendota';
-import MatchAnalysis from './MatchAnalysis';
+import React, { Suspense, lazy, useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+import { HashRouter, Link, NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { Activity, Menu, UserRound, X } from 'lucide-react';
+import { useState } from 'react';
+import { GameData } from './components/GameData';
+import { PlayerSearch, State, paths } from './components/UI';
+import { readSaved } from './lib';
+import Home from './pages/Home';
 import './style.css';
-const tabs=[['overview','Обзор',LayoutDashboard],['matches','Матчи',Swords],['heroes','Герои',Flame],['mmr','Мой рейтинг',TrendingUp]];
-const format=n=>n==='—'||n==null?'—':Number(n).toLocaleString('ru-RU');
-const date=s=>new Date(s*1000).toLocaleDateString('ru-RU',{day:'numeric',month:'short'});
-const duration=n=>`${Math.floor(n/60)}:${String(n%60).padStart(2,'0')}`;
-function Modal({title,close,children}){const ref=useRef();useEffect(()=>{let previous=document.activeElement;ref.current.focus();const handler=e=>{if(e.key==='Escape')close();if(e.key==='Tab'){let els=ref.current.querySelectorAll('button,input,a,select');let first=els[0],last=els[els.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}};document.addEventListener('keydown',handler);return()=>{document.removeEventListener('keydown',handler);previous?.focus();};},[]);return <div className="overlay" onClick={e=>e.target===e.currentTarget&&close()}><section className="modal" role="dialog" aria-modal="true" aria-label={title} tabIndex="-1" ref={ref}><div className="section-head"><h2>{title}</h2><button className="icon-btn" aria-label="Закрыть" onClick={close}><X size={20}/></button></div>{children}</section></div>}
-function Chart({entries}){if(!entries.length)return <div className="empty"><TrendingUp/><h3>С чего начинаем?</h3><p>Добавь свой MMR. Следующие записи появятся на графике.</p></div>;const values=entries.map(x=>x.value),min=Math.min(...values)-50,max=Math.max(...values)+50;const points=values.map((v,i)=>[50+i*(650/Math.max(1,values.length-1)),145-(v-min)/(max-min)*110]);return <div className="chart"><svg viewBox="0 0 740 190" role="img" aria-label={`История MMR: ${values.join(', ')}`}><defs><linearGradient id="fill" x1="0" x2="0" y1="0" y2="1"><stop stopColor="#c4f56c" stopOpacity=".2"/><stop offset="1" stopColor="#c4f56c" stopOpacity="0"/></linearGradient></defs>{[45,95,145].map((y,i)=><g key={y}><line x1="48" y1={y} x2="710" y2={y} stroke="#2b302a" strokeDasharray="3 6"/><text x="0" y={y+4} fill="#737b71" fontSize="10">{Math.round(max-(y-35)/110*(max-min))}</text></g>)}<path d={`M${points.map(p=>p.join(',')).join(' L')} L${points.at(-1)[0]},155 L50,155 Z`} fill="url(#fill)"/><polyline points={points.map(p=>p.join(',')).join(' ')} fill="none" stroke="#c4f56c" strokeWidth="2.5" strokeLinejoin="round"/>{points.map((p,i)=><circle key={i} cx={p[0]} cy={p[1]} r="3" fill="#c4f56c"><title>{entries[i].date}: {entries[i].value} MMR</title></circle>)}{entries.filter((_,i)=>i===0||i===entries.length-1||i===Math.floor(entries.length/2)).map(e=><text key={e.date} x={points[entries.indexOf(e)][0]} y="182" textAnchor="middle" fill="#7f877b" fontSize="10">{e.date.slice(5).split('-').reverse().join('.')}</text>)}</svg></div>}
-function App(){
- const [tab,setTab]=useState('overview'),[mobile,setMobile]=useState(false),[heroes,setHeroes]=useState({}),[data,setData]=useState(null),[modal,setModal]=useState(null),[input,setInput]=useState(()=>readSaved('dotamate.lastId',readSaved('dotamate.profile',null)?.id||'')),[busy,setBusy]=useState(false),[error,setError]=useState(''),[filter,setFilter]=useState('all'),[search,setSearch]=useState(''),[mmrInput,setMmrInput]=useState(''),[mmrDate,setMmrDate]=useState(new Date().toLocaleDateString('en-CA')),[notice,setNotice]=useState(''),[historyVersion,setHistoryVersion]=useState(0);
- const matches=data?.matches||[],key=`dotamate.mmr.${data?.id}`,entries=data?readSaved(key,[]):[],stats=summarize(matches),current=entries.at(-1)?.value,delta=entries.length>1?current-entries[0].value:0;
- useEffect(()=>{fetch(`${import.meta.env.BASE_URL}heroes.json`).then(r=>r.json()).then(setHeroes).catch(()=>{});},[]);
- useEffect(()=>{if(!notice)return;let t=setTimeout(()=>setNotice(''),4500);return()=>clearTimeout(t);},[notice]);
- const hero=id=>heroes[id]||{localized_name:`Герой ${id}`,name:'npc_dota_hero_nevermore'};
- const image=id=>{const name=hero(id).name.replace('npc_dota_hero_','');return [11,1,44,14,6].includes(Number(id))?`${import.meta.env.BASE_URL}heroes/${name}.png`:`https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/${name}.png`;};
- async function load(value) {
-  setBusy(true);
-  setError('');
-  try {
-   const id=parseAccountId(value);
-   const profile=await loadProfile(id);
-   setData(profile);
-   setInput(value.trim());
-   save('dotamate.lastId',value.trim());
-   setModal(null);
-   setTab('overview');
-   setMobile(false);
-   setFilter('all');
-   setSearch('');
-  } catch(error) {
-   setError(error.message);
-  } finally {
-   setBusy(false);
-  }
- }
- const profileForm = <form onSubmit={event=>{event.preventDefault();load(input);}}>
-  <label className="field">SteamID или ID друга в Dota 2
-   <input autoComplete="off" placeholder="SteamID64 или ссылка /profiles/…" value={input} onChange={event=>setInput(event.target.value)} disabled={busy} required/>
-  </label>
-  {error&&<div className="error" role="alert">{error}</div>}
-  <button className="lime full" disabled={busy}>{busy?'Загружаю статистику…':'Получить разбор'}<ArrowRight size={17}/></button>
-  <p className="form-help">В Dota 2 включи «Общедоступную историю матчей». Можно вставить и числовую ссылку на профиль Steam.</p>
- </form>;
- if(!data) return <main className="profile-entry">
-  <section className="panel entry-panel">
-   <div className="entry-copy">
-    <div className="brand"><span className="brand-icon"><TrendingUp size={23}/></span>Dota<span>Mate</span></div>
-    <h1>Разбор профиля Dota 2</h1>
-    <p className="entry-summary">Введи SteamID, чтобы посмотреть винрейт, статистику героев и подробности последних матчей.</p>
-    {profileForm}
-   </div>
-   <img className="entry-art" src={`${import.meta.env.BASE_URL}heroes/nevermore.png`} alt=""/>
-  </section>
- </main>;
- function addMmr(e){e.preventDefault();let value=Number(mmrInput);if(!Number.isInteger(value)||value<0||value>20000||!/^\d{4}-\d{2}-\d{2}$/.test(mmrDate)){setError('Укажи дату и целый MMR от 0 до 20 000.');return;}let next=[...entries.filter(x=>x.date!==mmrDate),{date:mmrDate,value}].sort((a,b)=>a.date.localeCompare(b.date));if(!save(key,next)){setError('Браузер не разрешил сохранить запись.');return;}setHistoryVersion(historyVersion+1);setModal(null);setMmrInput('');setNotice('MMR сохранён в этом браузере');}
- const recentHeroes=Object.values(matches.reduce((out,m)=>{let h=out[m.hero_id]??={id:m.hero_id,games:0,wins:0};h.games++;h.wins+=isWin(m)?1:0;return out;},{})).sort((a,b)=>b.games-a.games);
- const heroStats=data.heroes?.map(hero=>({id:hero.hero_id,games:hero.games,wins:hero.win})) ?? recentHeroes;
- const shown=matches.filter(m=>(filter==='all'||isWin(m)===(filter==='win'))&&hero(m.hero_id).localized_name.toLowerCase().includes(search.toLowerCase()));
- const switchTab=t=>{setTab(t);setMobile(false);};
- function open(name){setError('');setModal(name);}
- const heroList=(full=false)=><div className="hero-list">{heroStats.slice(0,full?heroStats.length:4).map(h=><button key={h.id} className="hero-row" onClick={()=>{setSearch(hero(h.id).localized_name);setFilter('all');switchTab('matches');}}><img src={image(h.id)} alt=""/><div className="hero-name"><strong>{hero(h.id).localized_name}</strong><span>{h.games} матчей</span></div><div className="hero-win"><strong>{Math.round(h.wins/h.games*100)}%</strong><span className="bar"><i style={{width:`${h.wins/h.games*100}%`}}/></span></div><ChevronRight size={15}/></button>)}</div>;
- return <div className="app"><aside className={mobile?'sidebar show':'sidebar'}><a className="brand" href="#" onClick={e=>{e.preventDefault();switchTab('overview');}}><span className="brand-icon"><TrendingUp size={23}/></span>Dota<span>Mate</span><small>BETA</small></a><div className="nav-label">ТВОЯ ИГРА</div><nav>{tabs.map(([id,label,Icon])=><button key={id} className={tab===id?'active':''} onClick={()=>switchTab(id)}><Icon size={19}/>{label}{id==='overview'&&<span className="nav-dot"/>}</button>)}</nav><div className="sidebar-bottom"><div className="side-tip"><Target size={21}/><strong>Каждая игра — опыт.</strong><p>Смотри на прогресс,<br/>а не на один проигрыш.</p></div><button className="profile-switch" onClick={()=>open('connect')}><div className="avatar">{data.name?.slice(0,1)?.toUpperCase()||'D'}</div><div><strong>{data.name}</strong><span>ID {data.id}</span></div><Link2 size={16}/></button></div></aside>
- <div className="workspace"><header><div className="breadcrumb"><button className="icon-btn mobile-menu" aria-label="Открыть меню" onClick={()=>setMobile(!mobile)}><Menu size={21}/></button><span>Моя статистика</span><ChevronRight size={13}/><strong>{tabs.find(x=>x[0]===tab)[1]}</strong></div><div className="header-right"><span className="source"><i/>OpenDota</span><button className="outline small" onClick={()=>open('connect')}><Link2 size={15}/><span>Сменить профиль</span></button></div></header>
- <main><div className="page-title"><div><div className="eyebrow">DOTA 2 · ЛИЧНАЯ СТАТИСТИКА</div><h1>{tab==='overview'?data.name:tabs.find(x=>x[0]===tab)[1]}</h1><p>{tab==='overview'?'Статистика профиля Dota 2 из OpenDota.':tab==='matches'?'Последние 20 матчей открытого профиля.':tab==='heroes'?(data.heroes?'Статистика героев за всю историю в OpenDota.':'Статистика героев за последние матчи.'):'Записывай рейтинг и смотри, как меняется твоя игра.'}</p></div><button className="outline small" disabled={busy} onClick={()=>load(data.id)}><RefreshCw size={15}/>{busy?'Загружаю…':'Обновить'}</button></div>
- {error&&!modal&&<div className="error" role="alert">{error}</div>}
- {tab==='overview'&&<section className="panel profile-overview">
-  <div className="section-head"><h2>Вся история в OpenDota</h2><span className="muted">ID {data.id}</span></div>
-  <div className="detail-grid">
-   <div><span>Ранг</span><strong>{rankLabel(data.rank,data.leaderboard)}</strong></div>
-   <div><span>Матчи</span><strong>{data.totals?format(data.totals.win+data.totals.lose):'—'}</strong></div>
-   <div><span>Винрейт</span><strong>{data.totals&&(data.totals.win+data.totals.lose)>0?`${(100*data.totals.win/(data.totals.win+data.totals.lose)).toFixed(1)}%`:'—'}</strong></div>
-   <div><span>Победы</span><strong>{format(data.totals?.win)}</strong></div>
-   <div><span>Поражения</span><strong>{format(data.totals?.lose)}</strong></div>
-   <div><span>Героев сыграно</span><strong>{format(data.heroes?.length)}</strong></div>
-  </div>
-  {(!data.totals||!data.heroes)&&<p className="muted data-note">Часть статистики за всю историю недоступна. Можно обновить профиль.</p>}
- </section>}
- {tab==='overview'&&<h2 className="recent-heading">За последние {stats.count} матчей</h2>}
- {(tab==='overview'||tab==='matches')&&<section className="stats-grid">{[[Gamepad2,'МАТЧИ',stats.count,<span key="a">Последние матчи</span>],[Target,'ВИНРЕЙТ',stats.count?`${stats.winrate}%`:'—',<span key="b"><b className="green">{stats.wins} побед</b> / {stats.count-stats.wins} поражений</span>],[Swords,'СРЕДНИЙ KDA',stats.kda,<span key="c">(Убийства + помощь) / смерти</span>],[Zap,'ЗОЛОТО В МИНУТУ',format(stats.gpm),<span key="d">{stats.xpm} опыта в минуту</span>]].map(([Icon,label,value,sub])=><article className="stat" key={label}><div><span>{label}</span><Icon size={17}/></div><strong>{value}</strong><p>{sub}</p></article>)}</section>}
- {(tab==='overview'||tab==='mmr')&&<div className={tab==='overview'?'middle-grid':'mmr-layout'}><section className="panel rating-panel"><div className="section-head"><h2>Динамика рейтинга <span className="tag">MMR</span></h2><button className="text-button" onClick={()=>open('mmr')}><Plus size={15}/> Записать MMR</button></div><div className="rating-number"><strong>{current===undefined?'—':format(current)}</strong>{entries.length>1&&<span className={delta>=0?'positive':'negative'}>{delta>=0?'+':''}{delta} MMR <ArrowUpRight size={13}/></span>}<span className="muted">Введён вручную</span></div><Chart entries={entries}/><div className="panel-foot"><i className="legend-dot"/>Твой рейтинг<span>{entries.length} записей · В этом браузере</span></div></section>{tab==='overview'?<section className="panel"><div className="section-head"><h2>Твои герои</h2><button className="icon-btn" aria-label="Все герои" onClick={()=>switchTab('heroes')}><ArrowUpRight size={18}/></button></div>{heroList()}<div className="panel-foot">{data.heroes?'За всю историю в OpenDota':`За последние ${stats.count} матчей`}</div></section>:<section className="panel history"><h2>Записи MMR</h2><p className="muted">Одна запись на день. Повторная запись за ту же дату заменяет значение.</p>{[...entries].reverse().map(e=><div className="history-row" key={e.date}><span>{e.date.split('-').reverse().join('.')}</span><strong>{format(e.value)} MMR</strong></div>)}<p className="muted">MMR хранится только в этом браузере. Автоматически из Steam не загружается.</p></section>}</div>}
- {(tab==='overview'||tab==='matches')&&<section className="panel matches-panel"><div className="section-head"><h2>Последние матчи <span className="count">{stats.count}</span></h2>{tab==='overview'?<button className="text-button" onClick={()=>switchTab('matches')}>Все матчи <ArrowRight size={15}/></button>:<div className="table-controls"><label className="search"><Search size={15}/><input aria-label="Поиск по герою" placeholder="Найти героя" value={search} onChange={e=>setSearch(e.target.value)}/></label><select aria-label="Результат матча" value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">Все результаты</option><option value="win">Победы</option><option value="loss">Поражения</option></select></div>}</div><div className="table-scroll"><table><thead><tr><th>ГЕРОЙ</th><th>РЕЗУЛЬТАТ</th><th>K / D / A</th><th>GPM / XPM</th><th>ДЛИТЕЛЬНОСТЬ</th><th>ДАТА</th><th/></tr></thead><tbody>{(tab==='overview'?matches.slice(0,5):shown).map(m=><tr key={m.match_id}><td><button className="match-hero" onClick={()=>open(m)}><img src={image(m.hero_id)} alt=""/><span><strong>{hero(m.hero_id).localized_name}</strong><small>{m.lobby_type===7?'Рейтинговый':'Обычный матч'}</small></span></button></td><td><span className={isWin(m)?'result win':'result loss'}><i/>{isWin(m)?'Победа':'Поражение'}</span></td><td className="kda">{m.kills} <span>/</span> {m.deaths} <span>/</span> {m.assists}</td><td>{m.gold_per_min??'—'} <span className="muted">/ {m.xp_per_min??'—'}</span></td><td>{duration(m.duration)}</td><td className="muted">{date(m.start_time)}</td><td><button className="icon-btn" aria-label={`Подробности матча ${hero(m.hero_id).localized_name}`} onClick={()=>open(m)}><ChevronRight size={16}/></button></td></tr>)}</tbody></table></div>{!matches.length&&<div className="empty">Матчей пока нет. Включи общедоступную историю в Dota 2 и сыграй матч.</div>}{tab==='matches'&&matches.length>0&&!shown.length&&<div className="empty">В последних матчах ничего не найдено по этим фильтрам.</div>}</section>}
- {tab==='heroes'&&<section className="panel all-heroes"><div className="section-head"><h2>Герои по числу матчей</h2><span className="muted">Нажми на героя, чтобы найти его в последних матчах</span></div>{heroList(true)}{!heroStats.length&&<div className="empty">Герои появятся после загрузки матчей.</div>}</section>}
- <footer><span className="footer-brand">DotaMate <small>Смотри глубже. Играй лучше.</small></span><span>Данные: <a href="https://www.opendota.com" target="_blank" rel="noreferrer">OpenDota <ExternalLink size={11}/></a> · Не связан с Valve</span></footer></main></div>
- {modal==='connect'&&<Modal title="Сменить профиль" close={()=>setModal(null)}>{profileForm}</Modal>}
- {modal==='mmr'&&<Modal title="Записать MMR" close={()=>setModal(null)}><p className="muted">Укажи рейтинг из Dota 2. Запись сохранится для текущего профиля.</p><form onSubmit={addMmr}><label className="field">Текущий MMR<input type="number" min="0" max="20000" step="1" placeholder="Например, 3500" value={mmrInput} required onChange={e=>setMmrInput(e.target.value)}/></label><label className="field">Дата<input type="date" value={mmrDate} required onChange={e=>setMmrDate(e.target.value)}/></label>{error&&<div className="error" role="alert">{error}</div>}<button className="lime full">Сохранить запись<Check size={17}/></button></form></Modal>}
- {modal&&typeof modal==='object'&&<Modal title={hero(modal.hero_id).localized_name} close={()=>setModal(null)}>
-  <MatchAnalysis key={modal.match_id} summary={modal} hero={hero} image={image}/>
- </Modal>}{notice&&<div className="toast" role="status"><Check size={17}/>{notice}</div>}
- </div>;
+
+const Player = lazy(() => import('./pages/Player'));
+const Match = lazy(() => import('./pages/Match'));
+const Heroes = lazy(() => import('./pages/Heroes'));
+const Compare = lazy(() => import('./pages/Compare'));
+const Directory = lazy(() => import('./pages/Directory'));
+const links = [['/', 'Главная'], ['/players', 'Игроки'], ['/heroes', 'Герои'],
+  ['/matches', 'Матчи'], ['/compare', 'Аналитика'], ['/rankings', 'Рейтинги']];
+
+function App() {
+  const [menu, setMenu] = useState(false);
+  const { pathname } = useLocation();
+  const findSaved = () => readSaved('dotamate.lastId', readSaved('dotamate.profile', null)?.id);
+  const [saved, setSaved] = useState(findSaved);
+  useEffect(() => {
+    const update = () => setSaved(findSaved());
+    window.addEventListener('dotamate:profile', update);
+    return () => window.removeEventListener('dotamate:profile', update);
+  }, []);
+  useEffect(() => {
+    setMenu(false);
+    window.scrollTo(0, 0);
+  }, [pathname]);
+  return <>
+    <a className="skip-link" href="#content" onClick={event => { event.preventDefault(); document.getElementById('content').focus(); }}>К содержимому</a>
+    <header className="topbar">
+      <div className="top-inner">
+        <Link to="/" className="brand"><span className="mark"><Activity size={21}/></span>Dota<span>Mate</span></Link>
+        <button className="button secondary nav-toggle" aria-label={menu ? 'Закрыть меню' : 'Открыть меню'}
+          aria-expanded={menu} aria-controls="top-navigation" onClick={() => setMenu(!menu)}>{menu ? <X /> : <Menu />}</button>
+        <nav id="top-navigation" className={`top-nav ${menu ? 'expanded' : ''}`} aria-label="Главное меню">
+          {links.map(([to, label]) => <NavLink to={to} end={to === '/'} key={to}>{label}</NavLink>)}
+        </nav>
+        <div className="top-actions">
+          <PlayerSearch compact />
+          <select className="language" aria-label="Язык интерфейса" defaultValue="ru"><option value="ru">РУС</option></select>
+          {saved && <Link className="button secondary icon-button" to={paths.player(saved)} aria-label="Открыть сохранённый профиль"><UserRound size={17}/></Link>}
+        </div>
+      </div>
+    </header>
+    <main id="content" tabIndex={-1} className="main">
+      <Suspense fallback={<State />}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/players" element={<Directory type="players" />} />
+          <Route path="/players/:id/:section?" element={<Player />} />
+          <Route path="/heroes" element={<Heroes />} />
+          <Route path="/heroes/:id" element={<Heroes />} />
+          <Route path="/matches" element={<Directory type="matches" />} />
+          <Route path="/matches/:id" element={<Match />} />
+          <Route path="/compare" element={<Compare />} />
+          <Route path="/rankings" element={<Directory type="rankings" />} />
+          <Route path="*" element={<div className="state">Страница не найдена. <Link to="/">На главную</Link></div>} />
+        </Routes>
+      </Suspense>
+    </main>
+    <footer className="footer"><Link to="/" className="brand">Dota<span>Mate</span></Link><p>Игровые данные <a href="https://www.opendota.com/" target="_blank" rel="noreferrer">OpenDota</a> · Dota 2 принадлежит Valve</p></footer>
+  </>;
 }
-createRoot(document.getElementById('root')).render(<App/>);
+
+createRoot(document.getElementById('root')).render(<HashRouter><GameData><App /></GameData></HashRouter>);
